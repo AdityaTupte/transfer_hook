@@ -28,12 +28,14 @@ describe("transfer-hook", () => {
   anchor.setProvider(provider);
 
   const program = anchor.workspace.TransferHook as Program<TransferHook>;
+
   const wallet = provider.wallet as anchor.Wallet;
+  
   const connection = provider.connection;
 
   // Generate keypair to use as address for the transfer-hook enabled mint
   const mint = new Keypair();
-  const decimals = 9;
+  const decimals = 0;
 
   // Sender token account address
   const sourceTokenAccount = getAssociatedTokenAddressSync(
@@ -61,10 +63,20 @@ describe("transfer-hook", () => {
     program.programId
   );
   
-  const [counterPDA] = PublicKey.findProgramAddressSync(
-  [Buffer.from("counter"), mint.publicKey.toBuffer()],
-  program.programId
-);
+  // const [counterPDA] = PublicKey.findProgramAddressSync(
+  // [Buffer.from("counter"), mint.publicKey.toBuffer()],
+//   // program.programId
+// );
+
+  const [source_reward_pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("rewardpda"), mint.publicKey.toBuffer(),sourceTokenAccount.toBuffer()],
+    program.programId
+  );
+
+  const [destinaton_reward_pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("rewardpda"), mint.publicKey.toBuffer(),destinationTokenAccount.toBuffer()],
+    program.programId
+  );
 
   it("Create Mint Account with Transfer Hook Extension", async () => {
     const extensions = [ExtensionType.TransferHook];
@@ -72,7 +84,8 @@ describe("transfer-hook", () => {
     const lamports =
       await provider.connection.getMinimumBalanceForRentExemption(mintLen);
 
-    const transaction = new Transaction().add(
+    const transaction = new Transaction()
+    .add(
       SystemProgram.createAccount({
         fromPubkey: wallet.publicKey,
         newAccountPubkey: mint.publicKey,
@@ -80,6 +93,7 @@ describe("transfer-hook", () => {
         lamports: lamports,
         programId: TOKEN_2022_PROGRAM_ID,
       }),
+
       createInitializeTransferHookInstruction(
         mint.publicKey,
         wallet.publicKey,
@@ -148,99 +162,145 @@ describe("transfer-hook", () => {
     console.log(`Transaction Signature: ${txSig}`);
   });
 
-  // Account to store extra accounts required by the transfer hook instruction
-  it("Create ExtraAccountMetaList Account", async () => {
-    const extraAccountMetasInfo = await connection.getAccountInfo(extraAccountMetaListPDA);
-    
-    console.log("Extra accounts meta: " + extraAccountMetasInfo);
 
-    if (extraAccountMetasInfo === null) {
-      const initializeExtraAccountMetaListInstruction = await program.methods
-      .initializeExtraAccountMetaList()
-      .accounts({
-        mint: mint.publicKey,
-        
-        counterAccount: counterPDA,
-        tokenProgram:TOKEN_2022_PROGRAM_ID
-      })
-      .instruction();
+  it("create the reward_pda for token accounts", async() => {
 
+    //  const sourceRewardPda = await connection.getAccountInfo(source_reward_pda);
+
+    //  console.log("source_reward_pda meta: " + source_reward_pda);
+
+     
+     
+
+      // const initializeRewardPda = await program.methods.initailize()
+      //                             .accounts({
+      //                               payer: wallet.publicKey,
+      //                               mint: mint.publicKey,
+      //                               tokenProgram:TOKEN_2022_PROGRAM_ID
+      //                             }).instruction() ; 
+
+
+      const initializeRewardPda2 = await program.methods.initailize()
+                                  .accounts({
+                                    payer: wallet.publicKey,
+                                    dest : recipient.publicKey,
+                                    mint: mint.publicKey,
+                                    tokenProgram:TOKEN_2022_PROGRAM_ID
+                                  }).instruction() ; 
+                      
+                                  
       const transaction = new Transaction().add(
-        initializeExtraAccountMetaListInstruction
+            initializeRewardPda2        
       );
 
       const txSig = await sendAndConfirmTransaction(
-        provider.connection,
-        transaction,
-        [wallet.payer],
-        { skipPreflight: false, commitment: "confirmed"}
+                          provider.connection,
+                          transaction,
+                          [wallet.payer],
+                          { skipPreflight: false, commitment: "confirmed"}
       );
       console.log("Transaction Signature:", txSig);
-    }
+      const rewardData = await program.account.rewardPda.fetch(destinaton_reward_pda);
+      console.log("Decoded Reward PDA:", rewardData);
+      
+     
 
   });
 
-  it("Transfer Hook with Extra Account Meta", async () => {
-    // 1 tokens
-    const amount = 1 * 10 ** decimals;
-    const amountBigInt = BigInt(amount);
-
-    let transferInstructionWithHelper = await createTransferCheckedWithTransferHookInstruction( 
-      connection,
-      sourceTokenAccount,
-      mint.publicKey,
-      destinationTokenAccount,
-      wallet.publicKey,
-      amountBigInt,
-      decimals,
-      [],
-      "confirmed",
-      TOKEN_2022_PROGRAM_ID,
-    );
-
-    console.log("Extra accounts meta: " + extraAccountMetaListPDA);
-    console.log("Counter PDa: " + counterPDA);
-    console.log("Transfer Instruction: " + JSON.stringify(transferInstructionWithHelper));
+//   // Account to store extra accounts required by the transfer hook instruction
+  // it("Create ExtraAccountMetaList Account", async () => {
+  //   const extraAccountMetasInfo = await connection.getAccountInfo(extraAccountMetaListPDA);
     
-    const transaction = new Transaction().add(
-      transferInstructionWithHelper
-    );
+  //   console.log("Extra accounts meta: " + extraAccountMetasInfo);
 
- for (let i = 0; i < 3; i++) {
-  const ix = await createTransferCheckedWithTransferHookInstruction(
-    connection,
-    sourceTokenAccount,
-    mint.publicKey,
-    destinationTokenAccount,
-    wallet.publicKey,
-    amountBigInt,
-    decimals,
-    [],
-    "confirmed",
-    TOKEN_2022_PROGRAM_ID,
-  );
+  //   if (extraAccountMetasInfo === null) {
+  //     const initializeExtraAccountMetaListInstruction = await program.methods
+  //     .initializeExtraAccountMetaList()
+  //     .accounts({
+  //       mint: mint.publicKey,
+        
+  //       counterAccount: counterPDA,
+  //       tokenProgram:TOKEN_2022_PROGRAM_ID
+  //     })
+  //     .instruction();
 
-  const tx = new Transaction().add(ix);
+  //     const transaction = new Transaction().add(
+  //       initializeExtraAccountMetaListInstruction
+  //     );
 
-  const latestBlockhash = await connection.getLatestBlockhash();
+  //     const txSig = await sendAndConfirmTransaction(
+  //       provider.connection,
+  //       transaction,
+  //       [wallet.payer],
+  //       { skipPreflight: false, commitment: "confirmed"}
+  //     );
+  //     console.log("Transaction Signature:", txSig);
+  //   }
 
-  tx.recentBlockhash = latestBlockhash.blockhash;
-  tx.feePayer = wallet.publicKey;
+  // });
 
-  tx.sign(wallet.payer);
+//   it("Transfer Hook with Extra Account Meta", async () => {
+//     // 1 tokens
+//     const amount = 1 * 10 ** decimals;
+//     const amountBigInt = BigInt(amount);
 
-  const sig = await connection.sendRawTransaction(tx.serialize());
+//     let transferInstructionWithHelper = await createTransferCheckedWithTransferHookInstruction( 
+//       connection,
+//       sourceTokenAccount,
+//       mint.publicKey,
+//       destinationTokenAccount,
+//       wallet.publicKey,
+//       amountBigInt,
+//       decimals,
+//       [],
+//       "confirmed",
+//       TOKEN_2022_PROGRAM_ID,
+//     );
 
-  await connection.confirmTransaction({
-    signature: sig,
-    blockhash: latestBlockhash.blockhash,
-    lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-  });
+//     console.log("Extra accounts meta: " + extraAccountMetaListPDA);
+//     console.log("Counter PDa: " + counterPDA);
+//     console.log("Transfer Instruction: " + JSON.stringify(transferInstructionWithHelper));
+    
+//     const transaction = new Transaction().add(
+//       transferInstructionWithHelper
+//     );
 
-  const counterAccount = await program.account.counterAccount.fetch(counterPDA);
-  console.log(`After transfer ${i + 1}:`, counterAccount.counter.toString());
+//  for (let i = 0; i < 3; i++) {
+//   const ix = await createTransferCheckedWithTransferHookInstruction(
+//     connection,
+//     sourceTokenAccount,
+//     mint.publicKey,
+//     destinationTokenAccount,
+//     wallet.publicKey,
+//     amountBigInt,
+//     decimals,
+//     [],
+//     "confirmed",
+//     TOKEN_2022_PROGRAM_ID,
+//   );
 
-  await new Promise(res => setTimeout(res, 300)); // optional stability
-}
-  });
+//   const tx = new Transaction().add(ix);
+
+//   const latestBlockhash = await connection.getLatestBlockhash();
+
+//   tx.recentBlockhash = latestBlockhash.blockhash;
+//   tx.feePayer = wallet.publicKey;
+
+//   tx.sign(wallet.payer);
+
+//   const sig = await connection.sendRawTransaction(tx.serialize());
+
+//   await connection.confirmTransaction({
+//     signature: sig,
+//     blockhash: latestBlockhash.blockhash,
+//     lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+//   });
+
+//   const counterAccount = await program.account.counterAccount.fetch(counterPDA);
+//   console.log(`After transfer ${i + 1}:`, counterAccount.counter.toString());
+
+//   await new Promise(res => setTimeout(res, 300)); // optional stability
+// }
+//   });
 });
+

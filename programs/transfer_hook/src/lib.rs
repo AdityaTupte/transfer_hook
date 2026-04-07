@@ -3,8 +3,7 @@ use anchor_lang::{
     system_program::{create_account, CreateAccount},
 };
 use anchor_spl::{
-    associated_token::AssociatedToken,
-    token_interface::{Mint, TokenAccount, TokenInterface},
+    associated_token::AssociatedToken, token_interface::{Mint, TokenAccount, TokenInterface}
 };
 use spl_tlv_account_resolution::{
     account::ExtraAccountMeta, seeds::Seed, state::ExtraAccountMetaList,
@@ -13,12 +12,6 @@ use spl_transfer_hook_interface::instruction::{ExecuteInstruction, TransferHookI
 
 
 declare_id!("6Gt4YXeoa6MKgn5PjMBf1sE1bh6TaaUfxWuiEj9LnzSj");
-
-#[error_code]
-pub enum MyError {
-    #[msg("The amount is too big")]
-    AmountTooBig,
-}
 
 
 #[error_code]
@@ -42,7 +35,8 @@ pub enum ErrorCode {
 
 pub const PRECISION: u128 = 1_000_000_000_000; // 1e12
 
-
+pub const MAIN_PROGRAM_ID: Pubkey =
+    pubkey!("6Gt4YXeoa6MKgn5PjMBf1sE1bh6TaaUfxWuiEj9LnzSj");
 
 #[program]
 pub mod transfer_hook {                                                  
@@ -142,64 +136,131 @@ pub mod transfer_hook {
 
     pub fn transfer_hook(ctx: Context<TransferHook>, amount: u64) -> Result<()> {
         
+        
+
         let dividend_per_token = &mut ctx.accounts.dividend_account;
 
         let source_ata = &ctx.accounts.source_token;
 
         let destination_ata = &ctx.accounts.destination_token;
 
-        let source = &mut ctx.accounts.source_reward_pda;
+        let source_reward = &mut ctx.accounts.source_reward_pda;
 
-        let destination = &mut ctx.accounts.destination_reward_pda;
+        let destination_reward = &mut ctx.accounts.destination_reward_pda;
 
-        let source_accumulated  =  dividend_per_token.dividend_per_token
-                                        .checked_mul(source_ata.amount as u128)
-                                        .ok_or(ErrorCode::ExtraAccountMetaListInitError)?
-                                        .checked_div(PRECISION)
-                                        .ok_or(ErrorCode::Overflow)?;
+        if source_reward.key() == destination_reward.key() {
+            return Ok(());
+        }
 
-        let source_pending = source_accumulated
-                                        .checked_sub(source.reward_debt)
-                                        .ok_or(ErrorCode::Underflow)?;
 
-        source.pending_reward = source_pending as u64;
-        
+        let dpt = dividend_per_token.dividend_per_token;
 
-        let destination_accumulated  =  dividend_per_token.dividend_per_token
-                                        .checked_mul(destination_ata.amount as u128)
-                                        .ok_or(ErrorCode::ExtraAccountMetaListInitError)?
-                                        .checked_div(PRECISION)
-                                        .ok_or(ErrorCode::Overflow)?;
+            // 1. Calculate accumulated (OLD balance)
+            let source_accumulate = (source_ata.amount as u128)
+                .checked_mul(dpt)
+                .ok_or(ErrorCode::Overflow)?
+                .checked_div(PRECISION)
+                .ok_or(ErrorCode::Overflow)?;
 
-        let destination_pending = destination_accumulated
-                                        .checked_sub(destination.reward_debt)
-                                        .ok_or(ErrorCode::Underflow)?;  
+            // 2. Calculate pending
+            let current_source_pending = source_accumulate
+                .checked_sub(source_reward.reward_debt)
+                .ok_or(ErrorCode::Underflow)?;
 
-        destination.pending_reward = destination_pending as u64;
+            // 3. Safe cast
+            let pending_u64 = u64::try_from(current_source_pending)
+                .map_err(|_| ErrorCode::Overflow)?;
 
-        let source_new_balance = source_ata.amount.checked_sub(amount).ok_or(ErrorCode::Underflow)?;
-        
-        let new_source_reward_debt  = dividend_per_token.dividend_per_token
-                                        .checked_mul(source_new_balance as u128)
-                                        .ok_or(ErrorCode::ExtraAccountMetaListInitError)?
-                                        .checked_div(PRECISION)
-                                        .ok_or(ErrorCode::Overflow)?;
+            // 4. Accumulate rewards
+            source_reward.pending_reward = source_reward.pending_reward
+                .checked_add(pending_u64)
+                .ok_or(ErrorCode::Overflow)?;
 
-        let destiantion_new_balance = destination_ata.amount.checked_add(amount).ok_or(ErrorCode::Underflow)?;
-        
-        let new_destination_reward_debt  = dividend_per_token.dividend_per_token
-                                        .checked_mul(destiantion_new_balance as u128)
-                                        .ok_or(ErrorCode::ExtraAccountMetaListInitError)?
-                                        .checked_div(PRECISION)
-                                        .ok_or(ErrorCode::Overflow)?;
+            // 5. Compute new balance
+            let new_source_balance = source_ata.amount
+                .checked_sub(amount)
+                .ok_or(ErrorCode::Underflow)?;
 
-        source.reward_debt = new_source_reward_debt;
+            // 6. Update reward debt (NEW balance)
+            source_reward.reward_debt = (new_source_balance as u128)
+                .checked_mul(dpt)
+                .ok_or(ErrorCode::Overflow)?
+                .checked_div(PRECISION)
+                .ok_or(ErrorCode::Overflow)?;
+            
 
-        destination.reward_debt = new_destination_reward_debt;
-                                                            
-       
-        Ok(())
+             // 1. Calculate accumulated (OLD balance)
+            let destination_accumulate = (destination_ata.amount as u128)
+                .checked_mul(dpt)
+                .ok_or(ErrorCode::Overflow)?
+                .checked_div(PRECISION)
+                .ok_or(ErrorCode::Overflow)?;
+
+            // 2. Calculate pending
+            let current_destiantion_pending = destination_accumulate
+                .checked_sub(destination_reward.reward_debt)
+                .ok_or(ErrorCode::Underflow)?;
+
+            // 3. Safe cast
+            let destiantion_pending_u64 = u64::try_from(current_destiantion_pending)
+                .map_err(|_| ErrorCode::Overflow)?;
+
+            // 4. Accumulate rewards
+            destination_reward.pending_reward = destination_reward.pending_reward
+                .checked_add(destiantion_pending_u64)
+                .ok_or(ErrorCode::Overflow)?;
+
+            // 5. Compute new balance
+            let new_destination_balance = destination_ata.amount
+                .checked_add(amount)
+                .ok_or(ErrorCode::Overflow)?;
+
+            // 6. Update reward debt (NEW balance)
+            destination_reward.reward_debt = (new_destination_balance as u128)
+                .checked_mul(dpt)
+                .ok_or(ErrorCode::Overflow)?
+                .checked_div(PRECISION)
+                .ok_or(ErrorCode::Overflow)?;
+
+            Ok(())
     }
+
+    pub fn initailize(_ctx:Context<InitalizeAccounts>)->Result<()>{
+
+        msg!("Reward account is created for the mint ");
+
+        Ok(())
+
+
+    }
+
+    pub fn initailizediv(ctx:Context<AccountsDiv>)->Result<()>{
+
+       let dic = &mut ctx.accounts.dividend_pda;
+
+                // initialize only once
+                if !dic.bool {
+                    dic.dividend_per_token = 0;
+                    dic.bool = true;
+                }
+
+                // update dividend_per_token safely
+            let increment = (50 as u128)
+                .checked_mul(PRECISION)
+                .ok_or(ErrorCode::Overflow)?
+                .checked_div(100 as u128)
+                .ok_or(ErrorCode::Underflow)?;
+
+            dic.dividend_per_token = dic.dividend_per_token
+                .checked_add(increment)
+                .ok_or(ErrorCode::Overflow)?;
+
+                Ok(())
+
+
+    }
+
+
 
     // fallback instruction handler as workaround to anchor instruction discriminator check
     pub fn fallback<'info>(
@@ -236,14 +297,6 @@ pub struct InitializeExtraAccountMetaList<'info> {
     )]
     pub extra_account_meta_list: AccountInfo<'info>,
     pub mint: InterfaceAccount<'info, Mint>,
-    #[account(
-        init_if_needed,
-        seeds = [b"dividend_per_token",mint.key().as_ref()], 
-        bump,
-        payer = payer,
-        space = 8 + 16
-    )]
-    pub dividend_account: Account<'info, DividendPerToken>,
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -276,7 +329,9 @@ pub struct TransferHook<'info> {
     #[account(
         mut,
         seeds = [b"dividend_per_token",mint.key().as_ref()],
-        bump
+        bump,
+        // seeds::program = MAIN_PROGRAM_ID,
+        // owner = MAIN_PROGRAM_ID 
     )]
     pub dividend_account: Account<'info, DividendPerToken>,
 
@@ -296,6 +351,83 @@ pub struct TransferHook<'info> {
 
 }
 
+
+#[derive(Accounts)]
+pub struct InitalizeAccounts<'info>{
+
+    #[account(
+        mut,
+    )]
+    pub payer: Signer<'info>,
+
+    pub mint : InterfaceAccount<'info,Mint>,
+    
+
+    #[account(
+        associated_token::mint = mint,
+        associated_token::authority = payer,
+         associated_token::token_program = token_program,
+    )]
+    pub token_account : InterfaceAccount<'info,TokenAccount>,
+
+
+    #[account(
+        init,
+        payer = payer,
+        seeds=[
+            b"rewardpda",
+            mint.key().as_ref(),
+            token_account.key().as_ref(),
+        ],
+        bump,
+        space = 8 + 25
+    )]
+    pub reward_pda : Account<'info,RewardPda>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program : Program<'info,System>,
+
+}
+
+
+
+#[derive(Accounts)]
+pub struct AccountsDiv<'info>{
+
+    #[account(
+        mut,
+    )]
+    pub payer: Signer<'info>,
+
+    pub mint : InterfaceAccount<'info,Mint>,
+
+    #[account(
+        associated_token::mint = mint,
+        associated_token::authority = payer,
+    )]
+    pub token_account : InterfaceAccount<'info,TokenAccount>,
+
+
+    #[account(
+        init,
+        payer = payer,
+        seeds=[
+            b"dividend_per_token",mint.key().as_ref()
+        ],
+        bump,
+        space = 8 + 25
+    )]
+    pub dividend_pda : Account<'info,DividendPerToken>,
+
+
+    pub system_program : Program<'info,System>,
+
+}
+
+
+
+
 #[account]
 pub struct RewardPda {
 
@@ -308,5 +440,7 @@ pub struct RewardPda {
 pub struct DividendPerToken{
 
     pub dividend_per_token : u128,
+
+    pub bool : bool,
 
 }
