@@ -157,13 +157,13 @@ pub mod transfer_hook {
 
         let transfer_amount = amount; // passed via instruction
 
-let source_old_balance = source_ata.amount
-    .checked_add(transfer_amount)
-    .ok_or(ErrorCode::Overflow)?;
+        let source_old_balance = source_ata.amount
+            .checked_add(transfer_amount)
+            .ok_or(ErrorCode::Overflow)?;
 
-    let destination_old_balance = destination_ata.amount
-    .checked_sub(transfer_amount)
-    .ok_or(ErrorCode::Underflow)?;
+            let destination_old_balance = destination_ata.amount
+            .checked_sub(transfer_amount)
+            .ok_or(ErrorCode::Underflow)?;
 
             // 1. Calculate accumulated (OLD balance)
             let source_accumulate = (source_old_balance as u128)
@@ -189,9 +189,8 @@ let source_old_balance = source_ata.amount
                 .checked_add(pending_u64)
                 .ok_or(ErrorCode::Overflow)?;
 
-            // 5. Compute new balance
         
-            // 6. Update reward debt (NEW balance)
+            // 5. Update reward debt (NEW balance)
             source_reward.reward_debt = (source_ata.amount as u128)
                 .checked_mul(dpt)
                 .ok_or(ErrorCode::Overflow)?
@@ -219,11 +218,9 @@ let source_old_balance = source_ata.amount
             destination_reward.pending_reward = destination_reward.pending_reward
                 .checked_add(destiantion_pending_u64)
                 .ok_or(ErrorCode::Overflow)?;
-
-            // 5. Compute new balance
             
 
-            // 6. Update reward debt (NEW balance)
+            // 5. Update reward debt (NEW balance)
             destination_reward.reward_debt = (destination_ata.amount as u128)
                 .checked_mul(dpt)
                 .ok_or(ErrorCode::Overflow)?
