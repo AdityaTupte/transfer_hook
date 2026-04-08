@@ -66,7 +66,7 @@ pub mod transfer_hook {
             ExtraAccountMeta::new_with_seeds(
                 &[
             Seed::Literal {
-                bytes: b"reward_pda".to_vec(),
+                bytes: b"rewardpda".to_vec(),
             },
             Seed::AccountKey {
                 index: 1, // mint (based on account order in TransferHook)
@@ -83,7 +83,7 @@ pub mod transfer_hook {
              ExtraAccountMeta::new_with_seeds(
                 &[
             Seed::Literal {
-                bytes: b"reward_pda".to_vec(),
+                bytes: b"rewardpda".to_vec(),
             },
             Seed::AccountKey {
                 index: 1, // mint (based on account order in TransferHook)
@@ -155,12 +155,25 @@ pub mod transfer_hook {
 
         let dpt = dividend_per_token.dividend_per_token;
 
+        let transfer_amount = amount; // passed via instruction
+
+let source_old_balance = source_ata.amount
+    .checked_add(transfer_amount)
+    .ok_or(ErrorCode::Overflow)?;
+
+    let destination_old_balance = destination_ata.amount
+    .checked_sub(transfer_amount)
+    .ok_or(ErrorCode::Underflow)?;
+
             // 1. Calculate accumulated (OLD balance)
-            let source_accumulate = (source_ata.amount as u128)
+            let source_accumulate = (source_old_balance as u128)
                 .checked_mul(dpt)
                 .ok_or(ErrorCode::Overflow)?
                 .checked_div(PRECISION)
                 .ok_or(ErrorCode::Overflow)?;
+
+          
+
 
             // 2. Calculate pending
             let current_source_pending = source_accumulate
@@ -177,12 +190,9 @@ pub mod transfer_hook {
                 .ok_or(ErrorCode::Overflow)?;
 
             // 5. Compute new balance
-            let new_source_balance = source_ata.amount
-                .checked_sub(amount)
-                .ok_or(ErrorCode::Underflow)?;
-
+        
             // 6. Update reward debt (NEW balance)
-            source_reward.reward_debt = (new_source_balance as u128)
+            source_reward.reward_debt = (source_ata.amount as u128)
                 .checked_mul(dpt)
                 .ok_or(ErrorCode::Overflow)?
                 .checked_div(PRECISION)
@@ -190,7 +200,7 @@ pub mod transfer_hook {
             
 
              // 1. Calculate accumulated (OLD balance)
-            let destination_accumulate = (destination_ata.amount as u128)
+            let destination_accumulate = (destination_old_balance as u128)
                 .checked_mul(dpt)
                 .ok_or(ErrorCode::Overflow)?
                 .checked_div(PRECISION)
@@ -211,12 +221,10 @@ pub mod transfer_hook {
                 .ok_or(ErrorCode::Overflow)?;
 
             // 5. Compute new balance
-            let new_destination_balance = destination_ata.amount
-                .checked_add(amount)
-                .ok_or(ErrorCode::Overflow)?;
+            
 
             // 6. Update reward debt (NEW balance)
-            destination_reward.reward_debt = (new_destination_balance as u128)
+            destination_reward.reward_debt = (destination_ata.amount as u128)
                 .checked_mul(dpt)
                 .ok_or(ErrorCode::Overflow)?
                 .checked_div(PRECISION)
@@ -405,6 +413,7 @@ pub struct AccountsDiv<'info>{
     #[account(
         associated_token::mint = mint,
         associated_token::authority = payer,
+         associated_token::token_program = token_program,
     )]
     pub token_account : InterfaceAccount<'info,TokenAccount>,
 
@@ -420,7 +429,8 @@ pub struct AccountsDiv<'info>{
     )]
     pub dividend_pda : Account<'info,DividendPerToken>,
 
-
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program : Program<'info,System>,
 
 }
