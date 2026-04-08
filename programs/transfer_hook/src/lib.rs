@@ -155,7 +155,7 @@ pub mod transfer_hook {
 
         let dpt = dividend_per_token.dividend_per_token;
 
-        let transfer_amount = amount; // passed via instruction
+        let transfer_amount = amount;
 
         let source_old_balance = source_ata.amount
             .checked_add(transfer_amount)
@@ -416,7 +416,7 @@ pub struct AccountsDiv<'info>{
 
 
     #[account(
-        init,
+        init_if_needed,
         payer = payer,
         seeds=[
             b"dividend_per_token",mint.key().as_ref()
