@@ -33,12 +33,13 @@ pub enum ErrorCode {
 }   
 
 
-pub const PRECISION: u128 = 1_000_000_000_000; // 1e12
+
+pub  const PRECISION: u128 = 1_000_000_000_000;   // 1e12
 
 
 
 pub const PROGRAM_ID : Pubkey =
-    pubkey!("8WqJHDAmC5TKi2KXio7ewsXJ6s5gjBRj4wNS97vmctT4");
+    pubkey!("BYtpqEouT7FFDUFjFeE2ecSDwf1VHNNHUkc2URswVZ4B");
 #[program]
 pub mod transfer_hook {                                                  
     use super::*;
@@ -159,6 +160,8 @@ pub mod transfer_hook {
     let account_data = ctx.accounts.dividend_account.try_borrow_data()?;
     let dividend_pda = DividendPda::try_deserialize(&mut &account_data[..])?;
 
+    
+
         // let dividend_per_token = &mut ctx.accounts.dividend_account;
 
         let source_ata = &ctx.accounts.source_token;
@@ -179,74 +182,141 @@ pub mod transfer_hook {
         let transfer_amount = amount;
 
         let source_old_balance = source_ata.amount
+
             .checked_add(transfer_amount)
+
             .ok_or(ErrorCode::Overflow)?;
 
+
+
             let destination_old_balance = destination_ata.amount
+
             .checked_sub(transfer_amount)
+
             .ok_or(ErrorCode::Underflow)?;
 
+        msg!("dpt = {}", dividend_pda.dividend_per_token);
+msg!("balance = {}", source_old_balance);
+
+
             // 1. Calculate accumulated (OLD balance)
+
             let source_accumulate = (source_old_balance as u128)
+
                 .checked_mul(dpt)
+
                 .ok_or(ErrorCode::Overflow)?
+
                 .checked_div(PRECISION)
+
                 .ok_or(ErrorCode::Overflow)?;
 
-          
-
+msg!("accumulated = {}", source_accumulate);
 
             // 2. Calculate pending
+
             let current_source_pending = source_accumulate
+
                 .checked_sub(source_reward.reward_debt)
+
                 .ok_or(ErrorCode::Underflow)?;
 
+
+
             // 3. Safe cast
+
             let pending_u64 = u64::try_from(current_source_pending)
+
                 .map_err(|_| ErrorCode::Overflow)?;
 
+
+
             // 4. Accumulate rewards
+
             source_reward.pending_reward = source_reward.pending_reward
+
                 .checked_add(pending_u64)
+
                 .ok_or(ErrorCode::Overflow)?;
+
+
 
         
+
             // 5. Update reward debt (NEW balance)
+
             source_reward.reward_debt = (source_ata.amount as u128)
+
                 .checked_mul(dpt)
+
                 .ok_or(ErrorCode::Overflow)?
+
                 .checked_div(PRECISION)
+
                 .ok_or(ErrorCode::Overflow)?;
+
             
+
+
 
              // 1. Calculate accumulated (OLD balance)
+
             let destination_accumulate = (destination_old_balance as u128)
+
                 .checked_mul(dpt)
+
                 .ok_or(ErrorCode::Overflow)?
+
                 .checked_div(PRECISION)
+
                 .ok_or(ErrorCode::Overflow)?;
+
+
 
             // 2. Calculate pending
+
             let current_destiantion_pending = destination_accumulate
+
                 .checked_sub(destination_reward.reward_debt)
+
                 .ok_or(ErrorCode::Underflow)?;
 
+
+
             // 3. Safe cast
+
             let destiantion_pending_u64 = u64::try_from(current_destiantion_pending)
+
                 .map_err(|_| ErrorCode::Overflow)?;
 
+
+
             // 4. Accumulate rewards
+
             destination_reward.pending_reward = destination_reward.pending_reward
+
                 .checked_add(destiantion_pending_u64)
+
                 .ok_or(ErrorCode::Overflow)?;
+
+            
             
 
+
             // 5. Update reward debt (NEW balance)
+
             destination_reward.reward_debt = (destination_ata.amount as u128)
+
                 .checked_mul(dpt)
+
                 .ok_or(ErrorCode::Overflow)?
+
                 .checked_div(PRECISION)
+
                 .ok_or(ErrorCode::Overflow)?;
+
+                
+
 
             Ok(())
     }
@@ -259,6 +329,20 @@ pub mod transfer_hook {
 
 
     }
+
+
+    pub fn claimed_pending(ctx:Context<ClaimedPendingDiv>)->Result<()>{
+
+        let reward_pda = &mut ctx.accounts.rewardPda;
+
+
+        reward_pda.pending_reward = 0;
+
+        Ok(())
+
+
+    }
+
 
     // pub fn initailizediv(ctx:Context<AccountsDiv>)->Result<()>{
 
@@ -374,19 +458,21 @@ pub struct TransferHook<'info> {
     )]
     pub dividend_account:UncheckedAccount<'info>,
 
+   /// CHECK: Deserialized manually inside the instruction
     #[account(
         mut,
-        seeds = [b"rewardpda",mint.key().as_ref(),source_token.key().as_ref()],
+        seeds = [b"rewardpda", mint.key().as_ref(), source_token.key().as_ref()],
         bump, 
     )]
-    pub source_reward_pda : Account<'info,RewardPda>,
+    pub source_reward_pda: Account<'info,RewardPda>,
 
+    /// CHECK: Deserialized manually inside the instruction
     #[account(
         mut,
-        seeds = [b"rewardpda",mint.key().as_ref(),destination_token.key().as_ref()],
+        seeds = [b"rewardpda", mint.key().as_ref(), destination_token.key().as_ref()],
         bump, 
     )]
-    pub destination_reward_pda : Account<'info,RewardPda>,
+    pub destination_reward_pda: Account<'info,RewardPda>,
 
 }
 
@@ -430,6 +516,44 @@ pub struct InitalizeAccounts<'info>{
 }
 
 
+#[derive(Accounts)]
+pub struct ClaimedPendingDiv<'info>{
+    ///CHECK : check dividendPda
+    #[account(
+        mut,
+        signer,
+        seeds=[
+            b"dividend",
+            governance_mint.key().as_ref(),
+        ],
+        bump,
+        seeds::program = PROGRAM_ID,
+    )]
+    pub dividend_pda: AccountInfo<'info>,
+
+
+    #[account()]
+    pub user:  Signer<'info>,
+
+    #[account(
+        associated_token::mint = governance_mint,
+        associated_token::authority = user,
+        associated_token::token_program = token_program,
+    )]
+    pub signer_governance_mint_ata : InterfaceAccount<'info,TokenAccount>,
+
+    #[account(
+        mut,
+        seeds = [b"rewardpda", governance_mint.key().as_ref(), signer_governance_mint_ata.key().as_ref()],
+        bump, 
+    )]
+    pub rewardPda : Account<'info,RewardPda>,
+
+    pub governance_mint : InterfaceAccount<'info,Mint>,
+
+    pub token_program : Interface<'info,TokenInterface>,
+
+}
 
 // #[derive(Accounts)]
 // pub struct AccountsDiv<'info>{
